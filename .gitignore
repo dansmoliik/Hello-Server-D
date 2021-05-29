@@ -13,3 +13,4 @@ hello_server-test-*
 *.o
 *.obj
 *.lst
+.idea
