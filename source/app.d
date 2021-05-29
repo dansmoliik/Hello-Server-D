@@ -1,5 +1,6 @@
 import std.stdio;
 import std.conv;
+import std.string;
 
 import core.stdc.stdio;
 import core.stdc.stdlib;
@@ -25,6 +26,8 @@ enum int PORT = 8080;
 enum SOCK_NONBLOCK = 0x800;
 enum ulong READ_CHUNK_SIZE = 512;
 enum int FDS_ARR_OFFSET = -5;
+enum string REPLY_NOT_FOUND = "HTTP/1.1 404 Not Found\r\n\r\n";
+enum string REPLY_OK = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n";
 
 string[MAX_EVENTS] replies;
 
@@ -38,40 +41,46 @@ ssize_t recv_msg(int fd, ref string msg)
     while ((size_recv =  recv( fd, chunk, READ_CHUNK_SIZE, 0) ) > 0)
     {
         total_size += size_recv;
-
         msg ~= to!string( chunk);
-
-        debug writeln( "\t", to!string( chunk));
-
+        //debug writeln( "\t", to!string( chunk));
         memset( chunk , 0, READ_CHUNK_SIZE);    //clear the variable chunk
-
-        writeln( size_recv);
     }
     return total_size;
 }
 
-string create_reply_ok(string uri)
+string create_json(string uri)
 {
-    return "OK";
+    ptrdiff_t index_of_name_substr = indexOf( uri, "name"); // find parameter "name" in the uri
+    if (index_of_name_substr == -1 || index_of_name_substr + 1 >= uri.length || uri[index_of_name_substr + 1] != '=')
+        return "{}"; // there is no parameter "name"
+    string data_substr = uri[index_of_name_substr + 5..$]; // slice off everything before actual name
+    ptrdiff_t index_of_symbol_and = indexOf( data_substr, "&"); // search for other parameters
+    if (index_of_symbol_and == -1) return "{\"hello\":\"" ~ data_substr ~ "\"}"; // "name" is the only parameter
+    return "{\"hello\":\"" ~ data_substr[0..index_of_symbol_and] ~ "\"}"; // slice off other parameters
 }
 
-string create_reply_not_found()
+string create_reply_ok(string uri)
 {
-    return "NOT FOUND";
+    string json_str = create_json( uri);
+    string reply = REPLY_OK ~ "Content-Length: " ~ to!string( json_str.length + 2) ~ "\r\n\r\n"; // 2 extra white spaces
+    reply = reply ~ json_str ~ "\r\n";
+    return reply;
 }
 
 string create_reply_from_msg(string msg)
 {
     string reply;
     auto parser = initParser!Msg();
-    parser.parseRequest(msg);
+    parser.parseRequest( msg);
 
-    switch(parser.method)
+    debug writeln( "SERVER:\tCreating response to method: ", parser.method);
+
+    switch (parser.method)
     {
         case "GET":
-            return create_reply_ok(to!string(parser.uri));
+        return create_reply_ok( to!string( parser.uri));
         default:
-            return create_reply_not_found();
+        return REPLY_NOT_FOUND;
     }
 }
 
@@ -79,7 +88,7 @@ void save_reply(int fd, string reply)
 {
     replies[fd + FDS_ARR_OFFSET] = reply;
 
-    debug writeln("\tReply saved at index: ", fd + FDS_ARR_OFFSET);
+    debug writeln( "SERVER:\tReply saved at index: ", fd + FDS_ARR_OFFSET);
 }
 
 void receive_msg(int fd, int epollfd, epoll_event ev)
@@ -87,18 +96,18 @@ void receive_msg(int fd, int epollfd, epoll_event ev)
     ssize_t msg_size;
     string msg, reply;
 
-    debug writeln( "\tHandling: ", fd);
+    debug writeln( "SERVER:\tReceiving message from: ", fd);
 
     msg_size = recv_msg( fd, msg);
 
-    debug writeln( "\tTotal msg length:", msg_size);
-    debug writeln( "\tMessage received: ", msg);
+    debug writeln( "SERVER:\tTotal msg length:", msg_size);
+    debug writeln( "SERVER:\tMessage received: ", msg);
 
-    reply = create_reply_from_msg(msg);
+    reply = create_reply_from_msg( msg);
 
-    debug writeln("\tCreated reply: ", reply);
+    debug writeln( "SERVER:\tCreated reply: ", reply);
 
-    save_reply(fd, reply);
+    save_reply( fd, reply);
 
     ev.data.fd = fd;
     //Set Write Action Events for Annotation
@@ -109,7 +118,7 @@ void receive_msg(int fd, int epollfd, epoll_event ev)
 
 int main()
 {
-    writeln( "SERVER STARTED");
+    writeln( "SERVER: SERVER STARTED");
 
     epoll_event ev;
     auto events = cast(epoll_event*)malloc( MAX_EVENTS * epoll_event.sizeof);
@@ -126,7 +135,7 @@ int main()
         perror( "socket error");
         exit( EXIT_FAILURE);
     }
-    debug writeln( "Socket created");
+    debug writeln( "SERVER: Socket created");
 
     int flags = 1;
     setsockopt( listen_sock, SOL_SOCKET, SO_REUSEADDR, cast(void*)&flags, int.sizeof);
@@ -137,14 +146,14 @@ int main()
         perror( "bind error");
         exit( EXIT_FAILURE);
     }
-    debug writeln( "Socket bound to local address");
+    debug writeln( "SERVER: Socket bound to local address");
 
     if (listen( listen_sock, 32) == -1)
     {
         perror( "listen error");
         exit( EXIT_FAILURE);
     }
-    debug writeln( "Socket listening");
+    debug writeln( "SERVER: Socket listening");
 
     epollfd = epoll_create1( 0);
     if (epollfd == -1) {
@@ -161,9 +170,9 @@ int main()
 
     for (;;)
     {
-        debug writeln( "Start waiting");
+        debug writeln( "SERVER: Start waiting");
         nfds = epoll_wait( epollfd, events, MAX_EVENTS, -1);
-        debug writeln( "Stopped waiting");
+        debug writeln( "SERVER: Stopped waiting");
         if (nfds == -1) {
             perror( "epoll_wait");
             exit( EXIT_FAILURE);
@@ -178,7 +187,7 @@ int main()
                     perror( "accept");
                     exit( EXIT_FAILURE);
                 }
-                debug writeln( "Got connection from: ", inet_ntoa( conn_addr.sin_addr), ":", ntohs( conn_addr.sin_port));
+                debug writeln( "SERVER: Got connection from: ", inet_ntoa( conn_addr.sin_addr), ":", ntohs( conn_addr.sin_port));
 
                 if (fcntl( conn_sock, F_SETFL, fcntl( conn_sock, F_GETFL, 0) | O_NONBLOCK) == -1){
                     perror( "calling fcntl");
@@ -192,15 +201,17 @@ int main()
                 }
             } else if (events[n].events&EPOLLIN)
             {
-                debug writeln( "EPOLLIN ",events[n].data.fd);
+                debug writeln( "SERVER: EPOLLIN ",events[n].data.fd);
 
                 receive_msg( events[n].data.fd, epollfd, ev);
             }
             else if (events[n].events&EPOLLOUT) // If there is data to send
                 {
-                    debug writeln( "EPOLLOUT ", events[n].data.fd);
+                    debug writeln( "SERVER: EPOLLOUT ", events[n].data.fd);
 
                     string reply = replies[events[n].data.fd + FDS_ARR_OFFSET];
+
+                    debug writeln( "SERVER:\tSending reply: ", reply);
 
                     send( events[n].data.fd, cast(char*)reply, reply.length, 0);
 
@@ -210,7 +221,7 @@ int main()
                         exit( EXIT_FAILURE);
                     }
                     close( events[n].data.fd);
-                    debug writeln( "\tClosed: :", events[n].data.fd);
+                    debug writeln( "SERVER:\tClosed: :", events[n].data.fd);
                 }
         }
     }
