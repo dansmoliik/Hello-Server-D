@@ -1,8 +1,6 @@
 import std.stdio;
 import std.conv;
 
-
-
 import core.stdc.stdio;
 import core.stdc.stdlib;
 import core.sys.linux.netinet.tcp;
@@ -25,48 +23,88 @@ import httparsed;
 enum int MAX_EVENTS = 10;
 enum int PORT = 8080;
 enum SOCK_NONBLOCK = 0x800;
-enum ulong READ_CHUNK_SIZE = 50;
+enum ulong READ_CHUNK_SIZE = 512;
+enum int FDS_ARR_OFFSET = -5;
 
-ssize_t recvMsg(int fd, char *msg)
+string[MAX_EVENTS] replies;
+
+ssize_t recv_msg(int fd, ref string msg)
 {
     ssize_t total_size = 0;
     ssize_t size_recv;
     char *chunk = cast(char*)malloc( READ_CHUNK_SIZE);
-    //char[READ_CHUNK_SIZE] chunk;
+    msg = "";
 
-
-    int i = 0;
-    while ((size_recv =  recv( fd, chunk ,READ_CHUNK_SIZE, 0) ) > 0)
+    while ((size_recv =  recv( fd, chunk, READ_CHUNK_SIZE, 0) ) > 0)
     {
         total_size += size_recv;
-        writeln( "\t", to!string(chunk));
-        memset( chunk , 0, READ_CHUNK_SIZE);    //clear the variable
+
+        msg ~= to!string( chunk);
+
+        debug writeln( "\t", to!string( chunk));
+
+        memset( chunk , 0, READ_CHUNK_SIZE);    //clear the variable chunk
 
         writeln( size_recv);
-
-        if (i>5) break ;
-        i++;
     }
     return total_size;
 }
 
-void respond(int fd, int epollfd, epoll_event ev)
+string create_reply_ok(string uri)
+{
+    return "OK";
+}
+
+string create_reply_not_found()
+{
+    return "NOT FOUND";
+}
+
+string create_reply_from_msg(string msg)
+{
+    string reply;
+    auto parser = initParser!Msg();
+    parser.parseRequest(msg);
+
+    switch(parser.method)
+    {
+        case "GET":
+            return create_reply_ok(to!string(parser.uri));
+        default:
+            return create_reply_not_found();
+    }
+}
+
+void save_reply(int fd, string reply)
+{
+    replies[fd + FDS_ARR_OFFSET] = reply;
+
+    debug writeln("\tReply saved at index: ", fd + FDS_ARR_OFFSET);
+}
+
+void receive_msg(int fd, int epollfd, epoll_event ev)
 {
     ssize_t msg_size;
-    char *msg;
+    string msg, reply;
+
     debug writeln( "\tHandling: ", fd);
 
-    msg_size = recvMsg( fd, msg);
+    msg_size = recv_msg( fd, msg);
+
     debug writeln( "\tTotal msg length:", msg_size);
+    debug writeln( "\tMessage received: ", msg);
 
+    reply = create_reply_from_msg(msg);
 
-    if (epoll_ctl( epollfd, EPOLL_CTL_DEL, fd, &ev) == -1) {
-        perror( "epoll_ctl: del conn_sock");
-        exit( EXIT_FAILURE);
-    }
-    close( fd);
-    free( msg);
-    debug writeln( "\tClosed: :", fd);
+    debug writeln("\tCreated reply: ", reply);
+
+    save_reply(fd, reply);
+
+    ev.data.fd = fd;
+    //Set Write Action Events for Annotation
+
+    ev.events=EPOLLOUT;
+    epoll_ctl( epollfd,EPOLL_CTL_MOD, fd, &ev);
 }
 
 int main()
@@ -156,20 +194,13 @@ int main()
             {
                 debug writeln( "EPOLLIN ",events[n].data.fd);
 
-                recvMsg( events[n].data.fd, null);
-
-                ev.data.fd = events[n].data.fd;
-                //Set Write Action Events for Annotation
-
-                ev.events=EPOLLOUT;
-                epoll_ctl( epollfd,EPOLL_CTL_MOD,events[n].data.fd,&ev);
-                //respond( events[n].data.fd, epollfd, ev);
+                receive_msg( events[n].data.fd, epollfd, ev);
             }
             else if (events[n].events&EPOLLOUT) // If there is data to send
                 {
                     debug writeln( "EPOLLOUT ", events[n].data.fd);
 
-                    auto reply = "sup dood\n";
+                    string reply = replies[events[n].data.fd + FDS_ARR_OFFSET];
 
                     send( events[n].data.fd, cast(char*)reply, reply.length, 0);
 
@@ -179,6 +210,7 @@ int main()
                         exit( EXIT_FAILURE);
                     }
                     close( events[n].data.fd);
+                    debug writeln( "\tClosed: :", events[n].data.fd);
                 }
         }
     }
