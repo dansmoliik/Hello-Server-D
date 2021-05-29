@@ -1,0 +1,7 @@
+name "hello_server"
+description "A primitive server accepting GET /hello?name=xxx and returning application/json in the {\"hello\":\"xxx\"} form."
+authors "Daniel Šmolík"
+copyright "Copyright © 2021, Daniel Šmolík"
+license "proprietary"
+
+dependency "httparsed" version=">=1.1.0"

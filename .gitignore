@@ -1,0 +1,15 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/hello_server
+hello_server.so
+hello_server.dylib
+hello_server.dll
+hello_server.a
+hello_server.lib
+hello_server-test-*
+*.exe
+*.o
+*.obj
+*.lst
