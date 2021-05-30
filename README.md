@@ -3,7 +3,7 @@ Simple server responding to HTTP GET requests in D language.
 
 Server responses with status 200 to GET requests to paths /hello and 404 any other path or request method.
 
-If requests contains optional parameter "name", it returns json in the format of {"hello":"<name>"}
+If a request contains an optional parameter "name", it returns json in the format of {"hello":"```<name>```"}
 
 ## Test
 
