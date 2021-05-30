@@ -1,5 +1,5 @@
 /*
-    Copied from "Usage" section of https://github.com/tchaloupka/httparsed
+ *   Copied from "Usage" section of https://github.com/tchaloupka/httparsed
 */
 module msg;
 
