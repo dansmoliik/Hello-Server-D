@@ -125,6 +125,13 @@ ssize_t recv_msg(int fd, ref string msg)
 string create_json(string uri)
 {
     ptrdiff_t index_of_name_substr = indexOf( uri, "name"); // find parameter "name" in the uri
+    while (index_of_name_substr != -1) // make sure it is really parameter name, not xname or namex
+    {
+        if ((uri[index_of_name_substr - 1] == '?' || uri[index_of_name_substr - 1] == '&') &&
+        index_of_name_substr + 4 < uri.length && uri[index_of_name_substr + 4] == '=')
+            break;
+        index_of_name_substr = indexOf( uri, "name", index_of_name_substr + 1);
+    }
     if (index_of_name_substr == -1 || index_of_name_substr + 4 >= uri.length || uri[index_of_name_substr + 4] != '=')
         return "{}\r\n"; // there is no parameter "name"
 
@@ -310,6 +317,18 @@ unittest
 
 unittest
 {
+    string msg = "GET /hello?myname=xXx&bla=blabla&mynamemy=xXx HTTP/1.1\r\nHost: 127.0.0.1:8090\r\n\r\n";
+    string reply = create_reply_from_msg( msg);
+    assert(indexOf( reply, "{}") != -1);
+
+    auto resParser = initParser!Msg();
+    resParser.parseResponse( reply);
+    assert(resParser.status == 200);
+    assert(resParser.statusMsg == "OK");
+}
+
+unittest
+{
     string msg = "GET /hello HTTP/1.1\r\nHost: 127.0.0.1:8090\r\n\r\n";
     string reply = create_reply_from_msg( msg);
     assert(indexOf( reply, "{}") != -1);
@@ -323,6 +342,18 @@ unittest
 unittest
 {
     string msg = "GET /hello? HTTP/1.1\r\nHost: 127.0.0.1:8090\r\n\r\n";
+    string reply = create_reply_from_msg( msg);
+    assert(indexOf( reply, "{}") != -1);
+
+    auto resParser = initParser!Msg();
+    resParser.parseResponse( reply);
+    assert(resParser.status == 200);
+    assert(resParser.statusMsg == "OK");
+}
+
+unittest
+{
+    string msg = "GET /hello?myname=xxx HTTP/1.1\r\nHost: 127.0.0.1:8090\r\n\r\n";
     string reply = create_reply_from_msg( msg);
     assert(indexOf( reply, "{}") != -1);
 
